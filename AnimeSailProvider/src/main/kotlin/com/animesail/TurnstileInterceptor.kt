@@ -70,13 +70,13 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
 
             wv.webViewClient = object : WebViewClient() {
 
-                @SuppressLint("WebViewClientOnReceivedSslError")
                 override fun onReceivedSslError(
                     view: WebView?,
                     handler: SslErrorHandler?,
                     error: SslError?
                 ) {
-                    handler?.proceed()
+                    // Never accept invalid certificates. Turnstile must run over valid HTTPS.
+                    handler?.cancel()
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
@@ -88,13 +88,12 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
             wv.loadUrl(url)
         }
 
-        var cookieAcquired = false
-        for (i in 0 until 60) {
+        // Give the official challenge a bounded window, but never wait indefinitely.
+        for (i in 0 until 20) {
             Thread.sleep(1000)
             val cookies = cookieManager.getCookie(domainUrl) ?: ""
-            if (cookies.contains(targetCookie)) {
+            if (cookies.split("; ").any { it.startsWith("$targetCookie=") && it.length > targetCookie.length + 1 }) {
                 cookieManager.flush()
-                cookieAcquired = true
                 break
             }
         }
