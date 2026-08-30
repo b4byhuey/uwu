@@ -89,7 +89,7 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
         }
 
         // Give the official challenge a bounded window, but never wait indefinitely.
-        for (i in 0 until 20) {
+        for (i in 0 until 60) {
             Thread.sleep(1000)
             val cookies = cookieManager.getCookie(domainUrl) ?: ""
             if (cookies.split("; ").any { it.startsWith("$targetCookie=") && it.length > targetCookie.length + 1 }) {
