@@ -11,9 +11,20 @@ import android.webkit.WebViewClient
 import com.lagradost.cloudstream3.CloudStreamApp
 import okhttp3.Interceptor
 import okhttp3.Response
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 
 class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") : Interceptor {
+
+    private val savedCookies = ConcurrentHashMap<String, String>()
+    private val savedUserAgents = ConcurrentHashMap<String, String>()
+
+    private fun cookieValue(cookieHeader: String): String? {
+        return cookieHeader.split("; ")
+            .firstOrNull { it.startsWith("$targetCookie=") }
+            ?.substringAfter('=')
+            ?.takeIf { it.isNotBlank() }
+    }
 
     @SuppressLint("SetJavaScriptEnabled", "WebViewClientOnReceivedSslError")
     override fun intercept(chain: Interceptor.Chain): Response {
@@ -21,6 +32,7 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
         val url = originalRequest.url.toString()
         val domainUrl = "${originalRequest.url.scheme}://${originalRequest.url.host}"
         val cookieManager = CookieManager.getInstance()
+        val host = originalRequest.url.host
 
         cookieManager.setAcceptCookie(true)
 
@@ -30,15 +42,21 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
         cookieManager.flush()
 
         val existingCookies = cookieManager.getCookie(domainUrl) ?: ""
-        if (existingCookies.contains(targetCookie)) {
+        val cachedCookies = savedCookies[host]
+        val cookiesToUse = if (cookieValue(existingCookies) != null) existingCookies
+        else cachedCookies ?: existingCookies
+        val cachedUserAgent = savedUserAgents[host]
+        if (cookieValue(cookiesToUse) != null) {
             val response = chain.proceed(
                 originalRequest.newBuilder()
-                    .header("Cookie", existingCookies)
+                    .header("Cookie", cookiesToUse)
+                    .apply { if (!cachedUserAgent.isNullOrBlank()) header("User-Agent", cachedUserAgent) }
                     .build()
             )
             if (response.code != 403 && response.code != 503) return response
 
             response.close()
+            savedCookies.remove(host)
             cookieManager.setCookie(domainUrl, "$targetCookie=; Max-Age=0; path=/; Secure")
             cookieManager.flush()
         }
@@ -67,6 +85,7 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
             }
 
             userAgentRef.set(wv.settings.userAgentString)
+            savedUserAgents[host] = wv.settings.userAgentString
 
             wv.webViewClient = object : WebViewClient() {
 
@@ -89,7 +108,7 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
         }
 
         // Give the official challenge a bounded window, but never wait indefinitely.
-        for (i in 0 until 60) {
+        for (i in 0 until 20) {
             Thread.sleep(1000)
             val cookies = cookieManager.getCookie(domainUrl) ?: ""
             if (cookies.split("; ").any { it.startsWith("$targetCookie=") && it.length > targetCookie.length + 1 }) {
@@ -107,6 +126,7 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
 
         val finalCookies = cookieManager.getCookie(domainUrl) ?: ""
         val finalUA = userAgentRef.get()
+        cookieValue(finalCookies)?.let { savedCookies[host] = finalCookies }
 
         return chain.proceed(
             originalRequest.newBuilder()
