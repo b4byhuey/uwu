@@ -32,6 +32,19 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
             ?.takeIf { it.isNotBlank() }
     }
 
+    private fun clearSession(cookieManager: CookieManager, host: String) {
+        savedCookies.remove(host)
+        cookieManager.setCookie(
+            SITE_ORIGIN,
+            "$targetCookie=; Max-Age=0; Path=/; Secure"
+        )
+        cookieManager.flush()
+    }
+
+    private fun isSessionRejected(response: Response): Boolean {
+        return response.code == 403 || response.code == 503
+    }
+
     @SuppressLint("SetJavaScriptEnabled", "WebViewClientOnReceivedSslError")
     override fun intercept(chain: Interceptor.Chain): Response {
         val originalRequest = chain.request()
@@ -65,12 +78,10 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
                     .apply { if (!cachedUserAgent.isNullOrBlank()) header("User-Agent", cachedUserAgent) }
                     .build()
             )
-            if (response.code != 403 && response.code != 503) return response
+            if (!isSessionRejected(response)) return response
 
             response.close()
-            savedCookies.remove(host)
-            cookieManager.setCookie(domainUrl, "$targetCookie=; Max-Age=0; path=/; Secure")
-            cookieManager.flush()
+            clearSession(cookieManager, host)
         }
 
         val context = CloudStreamApp.context
@@ -89,7 +100,7 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
             wv.settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
-                databaseEnabled = true
+
                 loadWithOverviewMode = true
                 useWideViewPort = true
                 userAgentString = SITE_USER_AGENT
@@ -121,7 +132,7 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
         }
 
         // Give the official challenge a bounded window, but never wait indefinitely.
-        for (i in 0 until 20) {
+        for (i in 0 until 60) {
             Thread.sleep(1000)
             val cookies = cookieManager.getCookie(SITE_ORIGIN).orEmpty()
             if (cookieValue(cookies) != null) {
@@ -144,7 +155,7 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
         return chain.proceed(
             originalRequest.newBuilder()
                 .apply { if (finalUA.isNotBlank()) header("User-Agent", finalUA) }
-                .header("Cookie", finalCookies)
+                .apply { if (finalCookies.isNotBlank()) header("Cookie", finalCookies) }
                 .build()
         )
     }
