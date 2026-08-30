@@ -16,6 +16,12 @@ import java.util.concurrent.atomic.AtomicReference
 
 class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") : Interceptor {
 
+    companion object {
+        private const val SITE_HOST = "v1.animesail.xyz"
+        private const val SITE_ORIGIN = "https://v1.animesail.xyz"
+        private const val SITE_USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36"
+    }
+
     private val savedCookies = ConcurrentHashMap<String, String>()
     private val savedUserAgents = ConcurrentHashMap<String, String>()
 
@@ -30,10 +36,16 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
     override fun intercept(chain: Interceptor.Chain): Response {
         val originalRequest = chain.request()
         val url = originalRequest.url.toString()
-        val domainUrl = "${originalRequest.url.scheme}://${originalRequest.url.host}"
+        // Only AnimeSail pages use this site cookie. Do not attach it to extractor hosts.
+        if (originalRequest.url.host != SITE_HOST) return chain.proceed(originalRequest)
+        val domainUrl = SITE_ORIGIN
         val cookieManager = CookieManager.getInstance()
         val host = originalRequest.url.host
-
+        val captureCookies = {
+            cookieManager.flush()
+            val cookies = cookieManager.getCookie(SITE_ORIGIN).orEmpty()
+            if (cookieValue(cookies) != null) savedCookies[host] = cookies
+        }
         cookieManager.setAcceptCookie(true)
 
         cookieManager.setCookie(domainUrl, "_as_ipin_lc=id-ID; path=/; SameSite=Strict")
@@ -65,7 +77,7 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
             ?: return chain.proceed(originalRequest)
 
         val handler = Handler(Looper.getMainLooper())
-        val userAgentRef = AtomicReference(originalRequest.header("User-Agent") ?: "")
+        val userAgentRef = AtomicReference(SITE_USER_AGENT)
         val webViewRef = AtomicReference<WebView?>(null)
 
         handler.post {
@@ -80,8 +92,7 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
                 databaseEnabled = true
                 loadWithOverviewMode = true
                 useWideViewPort = true
-                val ua = userAgentRef.get()
-                if (ua.isNotBlank()) userAgentString = ua
+                userAgentString = SITE_USER_AGENT
             }
 
             userAgentRef.set(wv.settings.userAgentString)
@@ -100,7 +111,9 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    cookieManager.flush()
+                    // The challenge callback may set the cookie immediately before a reload.
+                    captureCookies()
+                    view?.postDelayed({ captureCookies() }, 250L)
                 }
             }
 
@@ -110,9 +123,9 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
         // Give the official challenge a bounded window, but never wait indefinitely.
         for (i in 0 until 20) {
             Thread.sleep(1000)
-            val cookies = cookieManager.getCookie(domainUrl) ?: ""
-            if (cookies.split("; ").any { it.startsWith("$targetCookie=") && it.length > targetCookie.length + 1 }) {
-                cookieManager.flush()
+            val cookies = cookieManager.getCookie(SITE_ORIGIN).orEmpty()
+            if (cookieValue(cookies) != null) {
+                captureCookies()
                 break
             }
         }
@@ -124,9 +137,9 @@ class TurnstileInterceptor(private val targetCookie: String = "_as_turnstile") :
             }
         }
 
-        val finalCookies = cookieManager.getCookie(domainUrl) ?: ""
+        captureCookies()
+        val finalCookies = cookieManager.getCookie(SITE_ORIGIN).orEmpty()
         val finalUA = userAgentRef.get()
-        cookieValue(finalCookies)?.let { savedCookies[host] = finalCookies }
 
         return chain.proceed(
             originalRequest.newBuilder()
