@@ -23,6 +23,7 @@ import org.jsoup.nodes.Element
 
 class AnimeSailProvider : MainAPI() {
     override var mainUrl = "https://v1.animesail.xyz/?sync=8d306cc3-fc20-44ff-9d8a-66c7638dd643"
+    private val baseUrl = "https://v1.animesail.xyz"
     override var name = "AnimeSail"
     override val hasMainPage = true
     override var lang = "id"
@@ -58,7 +59,7 @@ class AnimeSailProvider : MainAPI() {
 
     private suspend fun request(url: String, ref: String? = null): NiceResponse {
         return app.get(
-            url,
+            addSyncQuery(url),
             interceptor = turnstileInterceptor,
             headers = mapOf(
                 "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -68,10 +69,15 @@ class AnimeSailProvider : MainAPI() {
         )
     }
 
+    private fun addSyncQuery(url: String): String {
+        if (!url.startsWith(baseUrl) || url.contains("sync=")) return url
+        return if (url.contains("?")) "$url&sync=8d306cc3-fc20-44ff-9d8a-66c7638dd643"
+        else "$url?sync=8d306cc3-fc20-44ff-9d8a-66c7638dd643"
+    }
     override val mainPage = mainPageOf(
-        "$mainUrl/rilisan-anime-terbaru/page/" to "Ongoing Anime",
-        "$mainUrl/rilisan-donghua-terbaru/page/" to "Ongoing Donghua",
-        "$mainUrl/movie-terbaru/page/" to "Movie"
+        "$baseUrl/rilisan-anime-terbaru/page/" to "Ongoing Anime",
+        "$baseUrl/rilisan-donghua-terbaru/page/" to "Ongoing Donghua",
+        "$baseUrl/movie-terbaru/page/" to "Movie"
     )
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
@@ -86,13 +92,13 @@ class AnimeSailProvider : MainAPI() {
         return if (uri.contains("/anime/")) {
             uri
         } else {
-            var title = uri.substringAfter("$mainUrl/")
+            var title = uri.substringAfter("$baseUrl/")
             title = when {
                 (title.contains("-episode")) && !(title.contains("-movie")) -> title.substringBefore("-episode")
                 (title.contains("-movie")) -> title.substringBefore("-movie")
                 else -> title
             }
-            "$mainUrl/anime/$title"
+            "$baseUrl/anime/$title"
         }
     }
 
@@ -123,7 +129,7 @@ class AnimeSailProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val link = "$mainUrl/?s=$query"
+        val link = "$baseUrl/?s=$query"
         val document = request(link).document
 
         return document.select("div.listupd article").map {
@@ -241,7 +247,7 @@ class AnimeSailProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         val document = request(data).document
-        val playerPath = "$mainUrl/utils/player/"
+        val playerPath = "$baseUrl/utils/player/"
 
         document.select(".mobius > .mirror > option").amap { element ->
             safeApiCall {
@@ -267,7 +273,7 @@ class AnimeSailProvider : MainAPI() {
                                 url = iframe,
                                 type = if (iframe.endsWith(".m3u8", ignoreCase = true)) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
                             ) {
-                                referer = mainUrl
+                                referer = baseUrl
                                 this.quality = quality
                             }
                         )
@@ -277,7 +283,7 @@ class AnimeSailProvider : MainAPI() {
                         val encodedUrl = iframe.substringAfter("url=").substringBefore("&")
                         if (encodedUrl.isNotBlank()) {
                             val realUrl = java.net.URLDecoder.decode(encodedUrl, "UTF-8")
-                            loadFixedExtractor(realUrl, serverName, quality, mainUrl, subtitleCallback, callback)
+                            loadFixedExtractor(realUrl, serverName, quality, baseUrl, subtitleCallback, callback)
                         }
                     }
 
@@ -302,7 +308,7 @@ class AnimeSailProvider : MainAPI() {
                             if (innerLink.contains(playerPath) || innerLink.contains("player-kodir")) {
                                 extractInternalPlayer(innerLink, data, serverName, quality, callback)
                             } else {
-                                loadFixedExtractor(innerLink, serverName, quality, mainUrl, subtitleCallback, callback)
+                                loadFixedExtractor(innerLink, serverName, quality, baseUrl, subtitleCallback, callback)
                             }
                         }
                     }
@@ -314,11 +320,11 @@ class AnimeSailProvider : MainAPI() {
                     iframe.contains("aghanim.xyz/tools/redirect/") -> {
                         val id = iframe.substringAfter("id=").substringBefore("&token")
                         val link = "https://rasa-cintaku-semakin-berantai.xyz/v/$id"
-                        loadFixedExtractor(link, serverName, quality, mainUrl, subtitleCallback, callback)
+                        loadFixedExtractor(link, serverName, quality, baseUrl, subtitleCallback, callback)
                     }
 
                     else -> {
-                        loadFixedExtractor(iframe, serverName, quality, mainUrl, subtitleCallback, callback)
+                        loadFixedExtractor(iframe, serverName, quality, baseUrl, subtitleCallback, callback)
                     }
                 }
             }
@@ -383,7 +389,7 @@ class AnimeSailProvider : MainAPI() {
                         url = link.url,
                         type = link.type
                     ) {
-                        this.referer = referer ?: mainUrl
+                        this.referer = referer ?: baseUrl
                         this.quality = if (link.type == ExtractorLinkType.M3U8) link.quality else quality ?: Qualities.Unknown.value
                         this.headers = link.headers
                         this.extractorData = link.extractorData
