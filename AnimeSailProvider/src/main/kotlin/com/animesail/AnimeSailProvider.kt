@@ -22,7 +22,7 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 
 class AnimeSailProvider : MainAPI() {
-    override var mainUrl = "https://v1.animesail.xyz/?sync=8d306cc3-fc20-44ff-9d8a-66c7638dd643"
+    override var mainUrl = "https://v1.animesail.xyz"
     override var name = "AnimeSail"
     override val hasMainPage = true
     override var lang = "id"
